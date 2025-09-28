@@ -1,8 +1,9 @@
 services:
   - type: web
-    name: phan-tich-diem
+    name: mt-test-zscore
     env: python
     plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python app.py"
-
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    autoDeploy: true
