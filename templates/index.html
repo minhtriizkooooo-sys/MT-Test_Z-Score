@@ -12,20 +12,16 @@
 </head>
 <body>
   <div class="container my-4">
-    
     <!-- Header Banner -->
-    <div class="header-banner row align-items-center mb-4">
+    <div class="row align-items-center mb-4 header-banner">
       <div class="col-md-2 text-center">
-        <!-- Logo -->
         <img src="{{ url_for('static', filename='Logo_Marie_Curie.png') }}" 
-             onerror="this.onerror=null; this.src='/static/Logo_Marie_Curie.png';"
              alt="Logo Trường Marie Curie" 
-             class="img-fluid rounded shadow-sm" 
-             style="max-width: 120px;">
+             class="img-fluid rounded shadow-sm">
       </div>
       <div class="col-md-10">
-        <h1 class="fw-bold">📊 Phân Tích Điểm Số Bất Thường Sử Dụng Z-Score</h1>
-        <p class="text-light">
+        <h1>📊 Phân Tích Điểm Số Bất Thường Sử Dụng Z-Score</h1>
+        <p>
           Ứng dụng phân tích điểm số bất thường dựa trên <b>Z-score</b>.<br>
           - File CSV cần có: <code>MaHS</code>, <code>Lop</code>, các cột môn học.<br>
           - Học sinh được coi là bất thường nếu <code>|z-score| > ngưỡng</code> (mặc định 2).
@@ -33,7 +29,7 @@
       </div>
     </div>
 
-    <!-- Form upload -->
+    <!-- Form Upload -->
     <form method="POST" enctype="multipart/form-data" class="mb-4">
       <label class="form-label">📂 Upload bảng điểm (CSV)</label>
       <input type="file" class="form-control mb-3" name="file" required>
@@ -51,9 +47,11 @@
 
     <!-- Kết quả -->
     {% if tables %}
+      <!-- Bảng gốc học sinh -->
       <h3>📋 Bảng gốc học sinh</h3>
       <div class="table-responsive">{{ tables|safe }}</div>
 
+      <!-- Bảng học sinh bất thường -->
       <h3>⚠️ Học sinh bất thường</h3>
       <div class="table-responsive">{{ anomalies|safe }}</div>
 
@@ -62,20 +60,22 @@
            class="btn btn-primary my-3">📥 Tải CSV học sinh bất thường</a>
       {% endif %}
 
+      <!-- Biểu đồ tổng học sinh vs bất thường -->
       <h3>📊 Biểu đồ cột theo lớp</h3>
       <div id="bar_chart" class="mb-4"></div>
       <script>
         var data = {{ summary_json | safe }};
-        Plotly.newPlot('bar_chart', data.data, data.layout);
+        Plotly.newPlot('bar_chart', data.data, data.layout, {responsive: true});
       </script>
 
+      <!-- Scatter & Histogram theo môn -->
       <h3>📈 Scatter & Histogram theo môn</h3>
       {% for subj, fig in scatter_plots %}
         <h4>{{ subj }}</h4>
-        <div id="scatter_{{ subj }}"></div>
+        <div id="scatter_{{ subj }}" class="mb-3"></div>
         <script>
           var scat = {{ fig | safe }};
-          Plotly.newPlot("scatter_{{ subj }}", scat.data, scat.layout);
+          Plotly.newPlot("scatter_{{ subj }}", scat.data, scat.layout, {responsive: true});
         </script>
       {% endfor %}
 
@@ -83,7 +83,7 @@
         <div id="hist_{{ subj }}" class="mb-4"></div>
         <script>
           var hist = {{ fig | safe }};
-          Plotly.newPlot("hist_{{ subj }}", hist.data, hist.layout);
+          Plotly.newPlot("hist_{{ subj }}", hist.data, hist.layout, {responsive: true});
         </script>
       {% endfor %}
     {% endif %}
