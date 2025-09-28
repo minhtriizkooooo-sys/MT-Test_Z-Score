@@ -1,0 +1,70 @@
+/* --- Banner Castorice bằng gradient --- */
+.header-banner {
+    position: relative;
+    padding: 30px 20px;
+    border-radius: 15px;
+    margin-bottom: 30px;
+    overflow: hidden;
+    /* Gradient kiểu Castorice: xanh lá + xanh ngọc + tím nhạt */
+    background: linear-gradient(135deg, #4cd1a1 0%, #2aa5b8 50%, #7b5fc0 100%);
+    color: #ffffff;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.header-banner h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    text-shadow: 0 0 8px rgba(255,255,255,0.6);
+    position: relative;
+    z-index: 1;
+}
+
+.header-banner p {
+    font-size: 1rem;
+    text-shadow: 0 0 6px rgba(0,0,0,0.3);
+    position: relative;
+    z-index: 1;
+}
+
+/* Optional: overlay mờ thêm để tạo depth */
+.header-banner::before {
+    content: "";
+    position: absolute;
+    top:0; left:0; right:0; bottom:0;
+    background: rgba(255,255,255,0.05);
+    z-index: 0;
+}
+
+/* --- Body và bảng --- */
+body {
+    background-color: #e6f2ef; /* nền nhẹ nhàng xanh lá */
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.table th {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) {
+    background-color: rgba(76, 175, 80, 0.1);
+}
+
+.table-bordered {
+    border: 2px solid #4CAF50;
+}
+
+.btn-success {
+    background-color: #4CAF50;
+    border-color: #4CAF50;
+}
+
+.btn-primary {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+footer {
+    font-size: 0.9rem;
+    color: #555;
+}
