@@ -1,26 +1,15 @@
-<!-- templates/intro.html -->
 <!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
   <title>Intro Video</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      overflow: hidden;
-      background-color: black;
-    }
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:black; }
+    video { width:100%; height:100%; object-fit:cover; }
   </style>
 </head>
 <body>
-  <video autoplay muted onended="window.location.href='{{ url_for('index') }}'">
+  <video autoplay muted onended="window.location.href='/index'">
     <source src="{{ url_for('static', filename='test.mp4') }}" type="video/mp4">
     Trình duyệt của bạn không hỗ trợ video.
   </video>
