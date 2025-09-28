@@ -1,57 +1,110 @@
-import os
-from flask import Flask, render_template, request
+# app.py
+from flask import Flask, render_template, request, redirect, url_for, send_file
 import pandas as pd
 import numpy as np
+from scipy.stats import zscore
+import io
+import plotly.express as px
+import plotly.io as pio
+import os
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
 
-# Tạo folder upload nếu chưa tồn tại
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+UPLOAD_FOLDER = 'uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-@app.route("/")
+# ===== Route intro video =====
+@app.route('/')
 def intro():
-    # Hiển thị video test.mp4 trước khi vào index
-    return render_template("intro.html")
+    return render_template('intro.html')
 
-@app.route("/index", methods=['GET', 'POST'])
+# ===== Route index =====
+@app.route('/index')
 def index():
-    tables = anomalies = filename = None
-    error = None
+    return render_template('index.html')
 
-    if request.method == 'POST':
-        try:
-            file = request.files['file']
-            df = pd.read_csv(file)
+# ===== Route upload file CSV =====
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return "Không có file được gửi", 400
+    file = request.files['file']
+    if file.filename == '':
+        return "Chưa chọn file", 400
+    if file:
+        # Lưu file tạm thời
+        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        file.save(file_path)
 
-            # Kiểm tra cột bắt buộc
-            if 'MaHS' not in df.columns or 'Lop' not in df.columns:
-                raise ValueError("CSV phải có cột MaHS và Lop")
+        # Phân tích học sinh bất thường
+        anomalies, bar_chart_html, scatter_html, hist_html = analyze_file(file_path)
 
-            # Chọn cột số và tính z-score
-            df_numeric = df.select_dtypes(include=np.number)
-            z_scores = np.abs((df_numeric - df_numeric.mean()) / df_numeric.std(ddof=0))
-            anomalies_df = df[(z_scores > 4).any(axis=1)]
+        # Lưu anomalies CSV
+        anomalies_csv_path = os.path.join(UPLOAD_FOLDER, 'anomalies.csv')
+        anomalies.to_csv(anomalies_csv_path, index=False)
 
-            # Lưu file anomalies
-            filename = "anomalies.csv"
-            anomalies_df.to_csv(os.path.join("static", filename), index=False)
+        return render_template('result.html',
+                               anomalies=anomalies.to_dict(orient='records'),
+                               bar_chart=bar_chart_html,
+                               scatter_chart=scatter_html,
+                               hist_chart=hist_html,
+                               csv_file='anomalies.csv')
 
-            tables = df.to_html(classes='table table-striped', index=False)
-            anomalies = anomalies_df.to_html(classes='table table-danger', index=False)
+# ===== Route download anomalies CSV =====
+@app.route('/download/<filename>')
+def download_file(filename):
+    return send_file(os.path.join(UPLOAD_FOLDER, filename),
+                     as_attachment=True)
 
-        except Exception as e:
-            error = str(e)
+# ===== Function analyze CSV =====
+def analyze_file(file_path):
+    df = pd.read_csv(file_path)
+    
+    # Chuẩn hóa cột
+    df.columns = df.columns.str.strip()
+    
+    # Lọc cột điểm số (cột có 'Diem' hoặc 'diem')
+    score_cols = [col for col in df.columns if 'Diem' in col or 'diem' in col]
+    
+    if not score_cols:
+        raise ValueError("File CSV không có cột điểm hợp lệ")
 
-    return render_template(
-        "index.html",
-        tables=tables,
-        anomalies=anomalies,
-        filename=filename,
-        error=error
-    )
+    # Chuyển các cột điểm về numeric
+    df[score_cols] = df[score_cols].apply(pd.to_numeric, errors='coerce')
 
-if __name__ == "__main__":
-    # Bind vào 0.0.0.0 và port Render cung cấp
+    # Tính z-score cho mỗi cột điểm
+    df_z = df.copy()
+    df_z['max_z'] = df_z[score_cols].apply(lambda x: np.max(np.abs(zscore(x, nan_policy='omit'))), axis=1)
+
+    # Lọc học sinh bất thường: max z > 4
+    anomalies = df_z[df_z['max_z'] > 4]
+
+    # ===== Vẽ biểu đồ =====
+    # 1. Biểu đồ cột số học sinh bất thường theo lớp
+    if 'Lop' in df.columns:
+        bar_df = anomalies.groupby('Lop').size().reset_index(name='SoHocSinhBatThuong')
+        bar_fig = px.bar(bar_df, x='Lop', y='SoHocSinhBatThuong',
+                         title='Số học sinh bất thường theo lớp',
+                         color='SoHocSinhBatThuong', color_continuous_scale='Greens')
+        bar_chart_html = pio.to_html(bar_fig, full_html=False)
+    else:
+        bar_chart_html = "<p>Không có cột 'Lop' trong file CSV</p>"
+
+    # 2. Scatter plot điểm vs z-score (lấy điểm đầu tiên)
+    first_score = score_cols[0]
+    scatter_fig = px.scatter(df_z, x=first_score, y='max_z', color='Lop' if 'Lop' in df.columns else None,
+                             title=f'Scatter {first_score} vs z-score')
+    scatter_html = pio.to_html(scatter_fig, full_html=False)
+
+    # 3. Histogram điểm
+    hist_fig = px.histogram(df_z, x=first_score, nbins=20, color='Lop' if 'Lop' in df.columns else None,
+                            title=f'Phân bố {first_score}')
+    hist_html = pio.to_html(hist_fig, full_html=False)
+
+    return anomalies, bar_chart_html, scatter_html, hist_html
+
+if __name__ == '__main__':
+    # Render yêu cầu bind port 0.0.0.0 cho hosting như Render
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True)
