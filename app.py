@@ -1,65 +1,88 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, send_file, jsonify
 import pandas as pd
-import numpy as np
-from scipy import stats
 import io
+import numpy as np
 
 app = Flask(__name__)
 
-# ===== ROUTES =====
+# Lưu DataFrame toàn bộ upload tạm thời trong memory
+df_global = None
+
 @app.route('/')
+def home():
+    return render_template('intro.html')
+
+@app.route('/index')
 def index():
     return render_template('index.html')
 
+@app.route('/upload', methods=['POST'])
+def upload():
+    global df_global
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'error': 'No file uploaded'}), 400
+    try:
+        df = pd.read_csv(file)
+        df_global = df
+        # Tạo danh sách Lop và Mon
+        lops = sorted(df['Lop'].dropna().unique())
+        mons = sorted(df['Mon'].dropna().unique())
+        return jsonify({'lops': lops, 'mons': mons})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    # Lấy file CSV từ request
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
+    global df_global
+    if df_global is None:
+        return jsonify({'error': 'No data uploaded'}), 400
+    data = request.get_json()
+    lop_filter = data.get('lop')
+    mon_filter = data.get('mon')
+    z_threshold = float(data.get('zscore', 3.0))
 
-    # Lấy filter params
-    selected_class = request.form.get('class', None)
-    selected_subject = request.form.get('subject', None)
-    z_thresh = float(request.form.get('zscore', 3.0))
+    df = df_global.copy()
 
-    # Đọc CSV
-    df = pd.read_csv(file)
-    df.columns = df.columns.str.strip()
-
-    # Lọc theo class và subject nếu có
-    if selected_class:
-        df = df[df['Lop'] == selected_class]
-    if selected_subject:
-        df = df[['StudentID', 'Lop', selected_subject]]
-
-    # Tính điểm trung bình nếu nhiều môn
-    subjects = [col for col in df.columns if col not in ['StudentID', 'Lop']]
-    df['Average'] = df[subjects].mean(axis=1)
+    if lop_filter != 'All':
+        df = df[df['Lop'] == lop_filter]
+    if mon_filter != 'All':
+        df = df[df['Mon'] == mon_filter]
 
     # Tính z-score
-    df['zscore'] = np.abs(stats.zscore(df['Average'], nan_policy='omit'))
+    df['zscore'] = np.abs((df['Diem'] - df['Diem'].mean()) / df['Diem'].std(ddof=0))
+    df_anomaly = df[df['zscore'] > z_threshold]
 
-    # HS bất thường
-    anomalies = df[df['zscore'] > z_thresh]
+    # Chuẩn bị dữ liệu chart theo lop
+    chart_data = df.groupby('Lop')['Diem'].mean().reset_index().to_dict(orient='records')
+    scatter_data = df.to_dict(orient='records')
+    hist_data = df['Diem'].tolist()
 
-    # Chuẩn bị dữ liệu trả về cho JS
-    result = {
-        'columns': list(anomalies.columns),
-        'data': anomalies.to_dict(orient='records')
-    }
-    return jsonify(result)
+    # Chuẩn bị dữ liệu anomalies để xuất file
+    anomalies_csv = df_anomaly.to_csv(index=False)
+    anomalies_bytes = io.BytesIO()
+    anomalies_bytes.write(anomalies_csv.encode('utf-8'))
+    anomalies_bytes.seek(0)
 
-@app.route('/download', methods=['POST'])
+    return jsonify({
+        'chart_data': chart_data,
+        'scatter_data': scatter_data,
+        'hist_data': hist_data,
+        'anomalies': df_anomaly.to_dict(orient='records')
+    })
+
+@app.route('/download')
 def download():
-    data = request.get_json()
-    df = pd.DataFrame(data)
+    global df_global
+    if df_global is None:
+        return "No data uploaded", 400
+    anomalies = df_global[df_global['zscore'] > 3.0] if 'zscore' in df_global else pd.DataFrame()
+    if anomalies.empty:
+        return "No anomalies found", 400
     output = io.BytesIO()
-    df.to_csv(output, index=False)
+    anomalies.to_csv(output, index=False)
     output.seek(0)
-    return send_file(output, mimetype='text/csv', as_attachment=True, download_name='anomalies.csv')
+    return send_file(output, download_name="anomalies.csv", as_attachment=True)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
