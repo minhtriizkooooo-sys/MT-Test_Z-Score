@@ -1,8 +1,8 @@
 services:
   - type: web
-    name: mt-test-zscore
+    name: zscore-app
     env: python
     plan: free
-    pythonVersion: "3.11"
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
+    pythonVersion: "3.11"
