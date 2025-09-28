@@ -1,7 +1,7 @@
-from flask import Flask, render_template, request, redirect, url_for
+import os
+from flask import Flask, render_template, request
 import pandas as pd
 import numpy as np
-import os
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
@@ -11,13 +11,13 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 @app.route("/")
 def intro():
+    # Hiển thị video test.mp4 trước khi vào index
     return render_template("intro.html")
 
-@app.route("/index", methods=['GET','POST'])
+@app.route("/index", methods=['GET', 'POST'])
 def index():
-    tables = anomalies = scatter_plots = hist_plots = summary_json = None
+    tables = anomalies = filename = None
     error = None
-    filename = None
 
     if request.method == 'POST':
         try:
@@ -28,12 +28,12 @@ def index():
             if 'MaHS' not in df.columns or 'Lop' not in df.columns:
                 raise ValueError("CSV phải có cột MaHS và Lop")
 
-            # Chọn các cột numeric để tính z-score
+            # Chọn cột số và tính z-score
             df_numeric = df.select_dtypes(include=np.number)
             z_scores = np.abs((df_numeric - df_numeric.mean()) / df_numeric.std(ddof=0))
             anomalies_df = df[(z_scores > 4).any(axis=1)]
 
-            # Lưu anomalies
+            # Lưu file anomalies
             filename = "anomalies.csv"
             anomalies_df.to_csv(os.path.join("static", filename), index=False)
 
@@ -52,4 +52,6 @@ def index():
     )
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Bind vào 0.0.0.0 và port Render cung cấp
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
