@@ -37,6 +37,8 @@ def upload():
     if not file:
         return jsonify({'error': 'No file uploaded'}), 400
     try:
+        # Đọc CSV an toàn
+        file.stream.seek(0)
         df = pd.read_csv(file)
         df = normalize_columns(df)
 
@@ -46,10 +48,10 @@ def upload():
                 'error': f'File CSV phải có các cột: {required_cols}, hiện tại: {list(df.columns)}'
             }), 400
 
-        df_global = df
+        df_global = df.copy()  # lưu bản gốc
         # Tạo danh sách Lop và Mon
-        lops = sorted(df['Lop'].dropna().unique())
-        mons = sorted(df['Mon'].dropna().unique())
+        lops = sorted(df['Lop'].dropna().unique().tolist())
+        mons = sorted(df['Mon'].dropna().unique().tolist())
         return jsonify({'lops': lops, 'mons': mons})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -59,6 +61,7 @@ def analyze():
     global df_global
     if df_global is None:
         return jsonify({'error': 'No data uploaded'}), 400
+
     data = request.get_json()
     lop_filter = data.get('lop')
     mon_filter = data.get('mon')
@@ -95,9 +98,16 @@ def download():
     global df_global
     if df_global is None:
         return "No data uploaded", 400
-    anomalies = df_global[df_global['zscore'] > 3.0] if 'zscore' in df_global else pd.DataFrame()
+
+    df = df_global.copy()
+    if 'zscore' not in df.columns:
+        # Nếu chưa tính thì tính luôn
+        df['zscore'] = np.abs((df['Diem'] - df['Diem'].mean()) / df['Diem'].std(ddof=0))
+
+    anomalies = df[df['zscore'] > 3.0]
     if anomalies.empty:
         return "No anomalies found", 400
+
     output = io.BytesIO()
     anomalies.to_csv(output, index=False)
     output.seek(0)
