@@ -1,105 +1,55 @@
-from flask import Flask, render_template, request, send_file, session, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for
 import pandas as pd
 import numpy as np
-from scipy import stats
-import json
-import plotly.express as px
+import os
 
 app = Flask(__name__)
-app.secret_key = "replace_with_a_strong_secret_key"
+app.config['UPLOAD_FOLDER'] = 'static/uploads'
 
-@app.route("/intro")
+# Tạo folder upload nếu chưa tồn tại
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+@app.route("/")
 def intro():
-    # Chỉ hiện 1 lần
-    if session.get("intro_done"):
-        return redirect(url_for("index"))
-    session["intro_done"] = True
     return render_template("intro.html")
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/index", methods=['GET','POST'])
 def index():
-    anomalies = None
-    summary_json = None
-    scatter_plots = []
-    hist_plots = []
-    filename = None
+    tables = anomalies = scatter_plots = hist_plots = summary_json = None
     error = None
-    tables = None
+    filename = None
 
-    if request.method == "POST":
-        z_threshold = float(request.form.get("z_threshold", 2.0))
-        file = request.files.get("file")
+    if request.method == 'POST':
+        try:
+            file = request.files['file']
+            df = pd.read_csv(file)
 
-        if file:
-            try:
-                df = pd.read_csv(file, encoding="utf-8")
-            except:
-                file.seek(0)
-                df = pd.read_csv(file, encoding="latin1")
+            # Kiểm tra cột bắt buộc
+            if 'MaHS' not in df.columns or 'Lop' not in df.columns:
+                raise ValueError("CSV phải có cột MaHS và Lop")
 
-            df.columns = df.columns.str.strip().str.replace(" ", "").str.capitalize()
+            # Chọn các cột numeric để tính z-score
+            df_numeric = df.select_dtypes(include=np.number)
+            z_scores = np.abs((df_numeric - df_numeric.mean()) / df_numeric.std(ddof=0))
+            anomalies_df = df[(z_scores > 4).any(axis=1)]
 
-            if "Lop" not in df.columns:
-                error = "Không tìm thấy cột 'Lop'"
-            else:
-                student_col = [c for c in df.columns if c.lower() in ["mahs","id","studentid"]]
-                if not student_col:
-                    error = "Không tìm thấy cột 'MaHS'"
-                else:
-                    df["MaHS"] = df[student_col[0]]
-                    subject_cols = [c for c in df.columns if c not in ["MaHS","Lop"]]
-                    if not subject_cols:
-                        error = "Không tìm thấy cột điểm môn học"
-                    else:
-                        # Z-score
-                        for subj in subject_cols:
-                            df[f"Z_{subj}"] = stats.zscore(df[subj].fillna(0))
-                            df[f"Highlight_{subj}"] = df[f"Z_{subj}"].abs() > z_threshold
+            # Lưu anomalies
+            filename = "anomalies.csv"
+            anomalies_df.to_csv(os.path.join("static", filename), index=False)
 
-                        anomalies = df[df[[f"Highlight_{s}" for s in subject_cols]].any(axis=1)]
+            tables = df.to_html(classes='table table-striped', index=False)
+            anomalies = anomalies_df.to_html(classes='table table-danger', index=False)
 
-                        # Summary
-                        class_summary = df.groupby("Lop").size().reset_index(name="Tổng học sinh")
-                        anomaly_count = anomalies.groupby("Lop").size().reset_index(name="Học sinh bất thường")
-                        summary = pd.merge(class_summary, anomaly_count, on="Lop", how="left").fillna(0)
+        except Exception as e:
+            error = str(e)
 
-                        fig_col = px.bar(summary, x="Lop", y=["Tổng học sinh","Học sinh bất thường"],
-                                         barmode="group",
-                                         color_discrete_map={"Tổng học sinh":"#4CAF50","Học sinh bất thường":"#FF5252"},
-                                         labels={"value":"Số học sinh","Lop":"Lớp"},
-                                         title="Tổng học sinh & Học sinh bất thường theo lớp")
-                        summary_json = json.dumps(fig_col, cls=plotly.utils.PlotlyJSONEncoder)
-
-                        for subj in subject_cols:
-                            fig_scat = px.scatter(df, x="MaHS", y=subj, color=f"Z_{subj}",
-                                                  color_continuous_scale="RdYlGn_r",
-                                                  size=df[f"Z_{subj}"].abs(),
-                                                  size_max=20,
-                                                  hover_data={"MaHS":True, subj:True, f"Z_{subj}":True})
-                            scatter_plots.append((subj, json.dumps(fig_scat, cls=plotly.utils.PlotlyJSONEncoder)))
-
-                            fig_hist = px.histogram(df, x=subj, nbins=20, color=f"Highlight_{subj}",
-                                                    color_discrete_map={True:"#FF0000", False:"#4CAF50"},
-                                                    labels={"count":"Số học sinh"})
-                            hist_plots.append((subj, json.dumps(fig_hist, cls=plotly.utils.PlotlyJSONEncoder)))
-
-                        filename = "Students_Anomalies.csv"
-                        anomalies.to_csv(filename, index=False, encoding="utf-8")
-
-                        tables = [df.to_html(classes="table table-striped", index=False)]
-
-    return render_template("index.html",
-                           tables=tables,
-                           anomalies=[anomalies.to_html(classes="table table-bordered", index=False)] if anomalies is not None else None,
-                           summary_json=summary_json,
-                           scatter_plots=scatter_plots,
-                           hist_plots=hist_plots,
-                           filename=filename,
-                           error=error)
-
-@app.route("/download/<filename>")
-def download_file(filename):
-    return send_file(filename, as_attachment=True)
+    return render_template(
+        "index.html",
+        tables=tables,
+        anomalies=anomalies,
+        filename=filename,
+        error=error
+    )
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True)
