@@ -3,7 +3,6 @@ services:
     name: mt-test-zscore
     env: python
     plan: free
-    region: oregon
+    pythonVersion: "3.11"
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
-    autoDeploy: true
