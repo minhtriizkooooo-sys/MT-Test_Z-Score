@@ -1,79 +1,65 @@
-# app.py
-from flask import Flask, render_template, request, redirect, url_for, send_file, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 import pandas as pd
 import numpy as np
-from io import BytesIO
-import plotly.express as px
-import base64
+from scipy import stats
+import io
 
 app = Flask(__name__)
 
-# Lưu dữ liệu CSV và anomalies tạm thời
-data_storage = {"df": None, "anomalies": None}
-
+# ===== ROUTES =====
 @app.route('/')
-def intro():
-    return render_template('intro.html')
-
-@app.route('/index')
 def index():
     return render_template('index.html')
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    file = request.files.get('file')
-    if not file:
-        return jsonify({"error": "No file uploaded"}), 400
+    # Lấy file CSV từ request
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
 
+    # Lấy filter params
+    selected_class = request.form.get('class', None)
+    selected_subject = request.form.get('subject', None)
+    z_thresh = float(request.form.get('zscore', 3.0))
+
+    # Đọc CSV
     df = pd.read_csv(file)
-    # Chuẩn hóa tên cột (StudentID, Class, Subject, Score)
-    df.columns = [c.strip() for c in df.columns]
-    for col in ['StudentID', 'Class', 'Subject', 'Score']:
-        if col not in df.columns:
-            return jsonify({"error": f"Missing column: {col}"}), 400
+    df.columns = df.columns.str.strip()
 
-    # Tính z-score theo Subject
-    df['zscore'] = df.groupby('Subject')['Score'].transform(lambda x: (x - x.mean())/x.std(ddof=0))
-    df['Anomaly'] = df['zscore'].abs() > 3  # threshold có thể thay đổi
+    # Lọc theo class và subject nếu có
+    if selected_class:
+        df = df[df['Lop'] == selected_class]
+    if selected_subject:
+        df = df[['StudentID', 'Lop', selected_subject]]
 
-    # Lưu dữ liệu tạm
-    data_storage["df"] = df
-    data_storage["anomalies"] = df[df['Anomaly']]
+    # Tính điểm trung bình nếu nhiều môn
+    subjects = [col for col in df.columns if col not in ['StudentID', 'Lop']]
+    df['Average'] = df[subjects].mean(axis=1)
 
-    # Lọc theo lớp nếu được gửi từ request
-    class_filter = request.form.get('class')
-    subject_filter = request.form.get('subject')
-    filtered_df = df.copy()
-    if class_filter:
-        filtered_df = filtered_df[filtered_df['Class'] == class_filter]
-    if subject_filter:
-        filtered_df = filtered_df[filtered_df['Subject'] == subject_filter]
+    # Tính z-score
+    df['zscore'] = np.abs(stats.zscore(df['Average'], nan_policy='omit'))
 
-    # Biểu đồ scatter
-    scatter_fig = px.scatter(filtered_df, x='StudentID', y='Score', color='Anomaly', 
-                             hover_data=['Class', 'Subject', 'zscore'])
-    scatter_fig.update_layout(margin=dict(l=20,r=20,t=20,b=20))
-    scatter_json = scatter_fig.to_json()
+    # HS bất thường
+    anomalies = df[df['zscore'] > z_thresh]
 
-    # Histogram
-    hist_fig = px.histogram(filtered_df, x='Score', nbins=20, color='Anomaly')
-    hist_fig.update_layout(margin=dict(l=20,r=20,t=20,b=20))
-    hist_json = hist_fig.to_json()
+    # Chuẩn bị dữ liệu trả về cho JS
+    result = {
+        'columns': list(anomalies.columns),
+        'data': anomalies.to_dict(orient='records')
+    }
+    return jsonify(result)
 
-    # Trả về dữ liệu anomalies và biểu đồ
-    anomalies_list = filtered_df[filtered_df['Anomaly']].to_dict(orient='records')
-    return jsonify({"anomalies": anomalies_list, "scatter": scatter_json, "hist": hist_json})
-
-@app.route('/export')
-def export_csv():
-    if data_storage["anomalies"] is None:
-        return "No data to export", 400
-
-    output = BytesIO()
-    data_storage["anomalies"].to_csv(output, index=False)
+@app.route('/download', methods=['POST'])
+def download():
+    data = request.get_json()
+    df = pd.DataFrame(data)
+    output = io.BytesIO()
+    df.to_csv(output, index=False)
     output.seek(0)
-    return send_file(output, mimetype="text/csv", as_attachment=True,
-                     download_name="anomalies.csv")
+    return send_file(output, mimetype='text/csv', as_attachment=True, download_name='anomalies.csv')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
